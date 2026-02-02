@@ -390,7 +390,8 @@ class YeelightMusicSync:
         """Start music server and tell light to connect"""
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind(('0.0.0.0', MUSIC_PORT))
+        # Security: Bind to local IP only, not 0.0.0.0 (all interfaces)
+        self.server.bind((self.local_ip, MUSIC_PORT))
         self.server.listen(1)
         self.server.settimeout(30)
         
@@ -412,6 +413,14 @@ class YeelightMusicSync:
         print("Waiting for light to connect...", flush=True)
         try:
             self.music_conn, addr = self.server.accept()
+            
+            # Security: Verify connection is from the expected light IP
+            if addr[0] != LIGHT_IP:
+                print(f"SECURITY: Rejected connection from unknown IP {addr[0]}", flush=True)
+                print(f"Expected: {LIGHT_IP}", flush=True)
+                self.music_conn.close()
+                return False
+            
             print(f"Light connected from {addr}!", flush=True)
             return True
         except socket.timeout:

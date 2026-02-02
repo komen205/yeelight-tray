@@ -1,0 +1,6 @@
+[yeelight]
+# Your Yeelight bulb IP address (find it in the Yeelight app or your router)
+ip = 192.168.1.100
+# Default Yeelight port (usually 55443)
+port = 55443
+

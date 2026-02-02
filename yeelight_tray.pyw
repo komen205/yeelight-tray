@@ -1,9 +1,11 @@
 """
 Yeelight System Tray Controller for Windows
 Controls Yeelight smart bulbs from the Windows system tray.
+Includes Music Sync feature for real-time audio visualization.
 """
 import socket
 import threading
+import subprocess
 import configparser
 import os
 import sys
@@ -14,13 +16,14 @@ import win32gui
 
 # Load config
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def load_config():
     config = configparser.ConfigParser()
     if os.path.exists(CONFIG_FILE):
         config.read(CONFIG_FILE)
     return {
-        "ip": config.get("yeelight", "ip", fallback="192.168.1.100"),
+        "ip": config.get("yeelight", "light_ip", fallback=config.get("yeelight", "ip", fallback="192.168.1.100")),
         "port": config.getint("yeelight", "port", fallback=55443),
     }
 
@@ -68,9 +71,87 @@ class YeelightController:
 
     def color_temp(self, value):
         self.send("set_ct_abx", f'[{value},"smooth",500]')
+    
+    def disable_music_mode(self):
+        """Disable music mode on the light"""
+        self.send("set_music", '[0]')
 
 
 light = YeelightController(LIGHT_IP, PORT)
+
+
+class MusicSyncManager:
+    """Manages the Music Sync subprocess."""
+    
+    def __init__(self):
+        self.process = None
+        self.running = False
+    
+    def start(self):
+        """Start music sync in background."""
+        if self.running and self.process and self.process.poll() is None:
+            return  # Already running
+        
+        script_path = os.path.join(SCRIPT_DIR, "yeelight_music_sync.py")
+        if not os.path.exists(script_path):
+            win32gui.MessageBox(0, 
+                "Music sync script not found!\n\nMake sure yeelight_music_sync.py is in the same folder.",
+                "Yeelight Music Sync", 
+                win32con.MB_OK | win32con.MB_ICONERROR)
+            return
+        
+        try:
+            # Start the music sync script
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            
+            self.process = subprocess.Popen(
+                [sys.executable, script_path],
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                cwd=SCRIPT_DIR
+            )
+            self.running = True
+        except Exception as e:
+            win32gui.MessageBox(0, 
+                f"Failed to start music sync:\n{e}",
+                "Yeelight Music Sync", 
+                win32con.MB_OK | win32con.MB_ICONERROR)
+    
+    def stop(self):
+        """Stop music sync."""
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=3)
+            except:
+                try:
+                    self.process.kill()
+                except:
+                    pass
+        self.process = None
+        self.running = False
+        
+        # Disable music mode on the light
+        light.disable_music_mode()
+    
+    def toggle(self):
+        """Toggle music sync on/off."""
+        if self.running and self.process and self.process.poll() is None:
+            self.stop()
+        else:
+            self.start()
+    
+    def is_running(self):
+        """Check if music sync is currently running."""
+        if self.process and self.process.poll() is None:
+            return True
+        self.running = False
+        return False
+
+
+music_sync = MusicSyncManager()
 
 
 class SysTrayIcon:
@@ -139,6 +220,9 @@ class SysTrayIcon:
         win32gui.Shell_NotifyIcon(win32gui.NIM_ADD, nid)
 
     def destroy(self, hwnd, msg, wparam, lparam):
+        # Stop music sync before quitting
+        music_sync.stop()
+        
         nid = (self.hwnd, 0)
         win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, nid)
         win32gui.PostQuitMessage(0)
@@ -153,12 +237,31 @@ class SysTrayIcon:
 
     def show_menu(self):
         menu = win32gui.CreatePopupMenu()
-        self._create_menu(menu, self.menu_options)
+        self._create_menu(menu, self._get_dynamic_menu())
 
         pos = win32gui.GetCursorPos()
         win32gui.SetForegroundWindow(self.hwnd)
         win32gui.TrackPopupMenu(menu, win32con.TPM_LEFTALIGN, pos[0], pos[1], 0, self.hwnd, None)
         win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
+    
+    def _get_dynamic_menu(self):
+        """Get menu with dynamic music sync status."""
+        # Update music sync menu item based on current state
+        music_text = "Stop Music Sync" if music_sync.is_running() else "Start Music Sync"
+        
+        # Rebuild menu with current music sync state
+        dynamic_options = []
+        for text, icon, action in self.menu_options:
+            if "Music Sync" in str(text) and not isinstance(action, list):
+                # Find and get the action ID for music sync toggle
+                for aid, act in self.menu_actions_by_id:
+                    if act == on_music_sync:
+                        dynamic_options.append((music_text, icon, aid))
+                        break
+            else:
+                dynamic_options.append((text, icon, action))
+        
+        return dynamic_options
 
     def _create_menu(self, menu, options):
         for text, icon, action in options[::-1]:
@@ -198,6 +301,7 @@ def temp_warm(): light.color_temp(2700)
 def temp_neutral(): light.color_temp(4000)
 def temp_cool(): light.color_temp(5500)
 def temp_day(): light.color_temp(6500)
+def on_music_sync(): music_sync.toggle()
 
 
 menu_options = (
@@ -219,6 +323,8 @@ menu_options = (
         ('Cool (5500K)', None, temp_cool),
         ('Daylight (6500K)', None, temp_day),
     )),
+    ('', None, None),
+    ('Start Music Sync', None, on_music_sync),
 )
 
 
@@ -228,4 +334,3 @@ if __name__ == '__main__':
         icon_path = None
     SysTrayIcon(icon_path, "Yeelight Control", menu_options)
     win32gui.PumpMessages()
-

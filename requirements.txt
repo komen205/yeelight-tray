@@ -1,3 +1,7 @@
+# System tray app
 pywin32>=306
 Pillow>=10.0.0
 
+# Music sync (optional - only needed for yeelight_music_sync.py)
+numpy>=1.24.0
+pyaudiowpatch>=0.2.12

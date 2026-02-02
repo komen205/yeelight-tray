@@ -74,6 +74,18 @@ LAN Control must be enabled on your Yeelight bulb:
 
 ## Auto-start with Windows
 
+**Option 1: Use the installer script (recommended)**
+```bash
+# Run the install script (double-click or run in terminal)
+install_startup.bat
+```
+
+To remove from startup:
+```bash
+uninstall_startup.bat
+```
+
+**Option 2: Manual**
 1. Press `Win + R`, type `shell:startup`, press Enter
 2. Create a shortcut to `yeelight_tray.pyw` in that folder
 
